@@ -5,9 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>My Budgets</title>
+
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--tx:#14181f;--mut:#6b7280;--ac:#0f766e;--bad:#dc2626;--good:#16a34a;--bd:#e5e7eb;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1116;--card:#171b22;--tx:#eef1f5;--mut:#98a2b3;--ac:#2dd4bf;--bd:#262c36}}
@@ -17,7 +19,7 @@ html{scroll-padding-top:env(safe-area-inset-top,0px)}
 body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 -apple-system,system-ui,"Segoe UI",sans-serif}
 main{max-width:640px;margin:0 auto;padding:16px}
 h1{font-size:22px;margin:4px 0 12px;display:flex;justify-content:space-between;align-items:center}
-.sync{font-size:12px;font-weight:400;color:var(--mut)}
+.sync{font-size:12px;font-weight:400;color:var(--mut);cursor:pointer}
 .tabs{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px}
 .tab{flex:none;border:1px solid var(--bd);background:var(--card);color:var(--tx);padding:8px 14px;border-radius:20px;font:inherit;cursor:pointer}
 .tab.on{background:var(--ac);color:#fff;border-color:var(--ac)}
@@ -42,135 +44,1953 @@ input,select{flex:1;min-width:110px;padding:10px;border:1px solid var(--bd);bord
 .chk{display:flex;align-items:center;gap:8px;margin-top:10px;color:var(--mut);font-size:14px}.chk input{flex:none;min-width:0}
 </style>
 </head>
+
 <body>
+
 <main>
-<h1>My Budgets <span class="sync" id="sync">Local only</span></h1>
+
+<h1>
+  My Budgets
+  <span class="sync" id="sync">Checking...</span>
+</h1>
+
 <div class="tabs" id="tabs"></div>
 <div id="view"></div>
+ 
+
+<div style="
+  text-align:center;
+  margin:32px 0 8px;
+  color:var(--mut);
+  font-size:12px;
+  letter-spacing:.4px;
+  opacity:.7;
+">
+  made by vlad
+</div>
 </main>
+
 <script>
+
 const KEY="budget-v1";
-let S={budgets:[{id:"b1",name:"Personal",limit:0,tx:[]},{id:"b2",name:"Business & Investing",limit:0,tx:[]}]};
-let cur="all", ref=null, ready=false;
+
+let S={
+  budgets:[
+    {
+      id:"b1",
+      name:"Personal",
+      limit:0,
+      tx:[]
+    },
+    {
+      id:"b2",
+      name:"Business & Investing",
+      limit:0,
+      tx:[]
+    }
+  ]
+};
+
+let cur="all";
+let ref=null;
+let ready=false;
+let fbOn=false;
+let auth=null;
+let fdb=null;
+let unsub=null;
+let saving=false;
+
 const $=id=>document.getElementById(id);
-const fmt=n=>new Intl.NumberFormat(undefined,{style:"currency",currency:"PHP"}).format(n||0);
-const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+const fmt=n=>new Intl.NumberFormat(undefined,{
+  style:"currency",
+  currency:"PHP"
+}).format(n||0);
+
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({
+  "&":"&amp;",
+  "<":"&lt;",
+  ">":"&gt;",
+  '"':"&quot;"
+}[c]));
+
 const uid=()=>Math.random().toString(36).slice(2,9);
-function dlg({title,msg,fields=[],ok="Save"}){return new Promise(res=>{
-  const o=document.createElement("div");o.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px;z-index:9";
-  o.innerHTML=`<div class="card" style="width:100%;max-width:360px;margin:0"><b>${esc(title)}</b>${msg?`<p class="mut">${esc(msg)}</p>`:""}${fields.map(f=>`<div style="margin-top:10px"><label class="mut">${esc(f.label)}</label>${f.options?`<select id="f_${f.id}" style="width:100%">${f.options.map(([v,l])=>`<option value="${v}">${esc(l)}</option>`).join("")}</select>`:`<input id="f_${f.id}" type="${f.type||"text"}" ${f.type==="number"?'inputmode="decimal"':""} value="${esc(f.value??"")}" style="width:100%">`}</div>`).join("")}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn ghost" id="dn">Cancel</button><button class="btn" id="dy">${esc(ok)}</button></div></div>`;
-  document.body.appendChild(o);
-  const done=v=>{o.remove();res(v)};
-  o.querySelector("#dn").onclick=()=>done(null);
-  o.querySelector("#dy").onclick=()=>{const v={};fields.forEach(f=>v[f.id]=o.querySelector("#f_"+f.id).value);done(v)};
-  const i=o.querySelector("input");if(i)i.focus()})}
-const pad=n=>String(n).padStart(2,"0");
-const stamp=()=>{const d=new Date();return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+"_"+pad(d.getHours())+"-"+pad(d.getMinutes())};
-const today=()=>{const d=new Date();return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())};
-function applyRec(){S.rec=S.rec||[];let ch=false;const td=today();
-  S.rec.forEach(r=>{const b=S.budgets.find(x=>x.id===r.bid);if(!b)return;let n=0;
-    while(r.next<=td&&n++<60){const id="r"+r.id+r.next;
-      if(!b.tx.some(t=>t.id===id))b.tx.push({id,type:r.type,amt:r.amt,note:r.note,cat:r.cat,date:r.next});
-      const [y,m]=r.next.split("-").map(Number);const d=new Date(y,m,1);
-      r.next=d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(Math.min(r.day,28));ch=true}});
-  return ch}
-function gainLine(b,t){const inv=t.inc-t.exp;
-  if(b.value==null)return `<div class="mut">Set current value to track gains</div>`;
-  const g=b.value-inv,p=inv>0?g/inv*100:0;
-  return `<div class="mut">Value ${fmt(b.value)} · <span class="amt ${g>=0?"in":"out"}">${g>=0?"+":"−"}${fmt(Math.abs(g))} (${p.toFixed(1)}%)</span></div>`}
-function chart(list){const m={};let tot=0;
-  list.forEach(b=>b.tx.forEach(t=>{if(t.type==="out"){const raw=(t.note||t.cat||"No note").trim(),c=raw.charAt(0).toUpperCase()+raw.slice(1).toLowerCase();m[c]=(m[c]||0)+t.amt;tot+=t.amt}}));
-  const e=Object.entries(m).sort((a,b)=>b[1]-a[1]);
-  return `<div class="card"><b>Spending by note / category</b>`+(e.length?e.map(([c,v])=>`<div class="row2"><span>${esc(c)}</span><span class="mut">${fmt(v)} · ${Math.round(v/tot*100)}%</span></div><div class="bar" style="margin:4px 0"><i style="width:${v/tot*100}%"></i></div>`).join(""):'<div class="mut">No expenses yet.</div>')+`</div>`}
-function exportCSV(list,name){const q=v=>'"'+String(v).replace(/"/g,'""')+'"';
-  const rows=[["Budget","Date","Type","Note","Amount"].join(",")];
-  list.forEach(b=>b.tx.forEach(t=>rows.push([b.name,t.date,t.type==="in"?"Income":"Expense",t.note||t.cat||"",t.amt].map(q).join(","))));
-  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([rows.join("\n")],{type:"text/csv"}));a.download=name+"_"+stamp()+".csv";document.body.appendChild(a);a.click();a.remove()}
-function lsGet(){try{const v=localStorage.getItem(KEY);if(v)S=JSON.parse(v)}catch(e){}}
-function save(){
-  try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}
-  if(ref){ref.set({json:JSON.stringify(S)}).catch(()=>{$("sync").textContent="Sync error"})}
-  render();
-}
-function totals(list){
-  let inc=0,exp=0,lim=0;
-  list.forEach(b=>{if(b.kind!=="save"&&b.kind!=="invest")lim+=+b.limit||0;b.tx.forEach(t=>t.type==="in"?inc+=t.amt:exp+=t.amt)});
-  return{inc,exp,lim};
-}
-function render(){
-  const tabs=$("tabs");
-  tabs.innerHTML=[{id:"all",name:"Overview"},...S.budgets].map(b=>`<button class="tab ${b.id===cur?"on":""}" data-t="${b.id}">${esc(b.name)}</button>`).join("")+`<button class="tab" id="addB">+ New</button>`;
-  tabs.querySelectorAll("[data-t]").forEach(el=>el.onclick=()=>{cur=el.dataset.t;render()});
-  $("addB").onclick=async()=>{const v=await dlg({title:"New budget",ok:"Create",fields:[{id:"n",label:"Name",value:""},{id:"k",label:"Type",options:[["spend","Spending budget"],["save","Savings"],["invest","Investment"]]},{id:"g",label:"Goal (optional, savings/investment only)",type:"number",value:""}]});
-    if(v&&v.n.trim()){const b={id:uid(),name:v.n.trim(),kind:v.k,limit:v.k!=="spend"?(parseFloat(v.g)||0):0,tx:[]};S.budgets.push(b);cur=b.id;save()}};
-  if(cur!=="all"&&!S.budgets.find(b=>b.id===cur))cur="all";
-  cur==="all"?renderAll():renderOne(S.budgets.find(b=>b.id===cur));
-}
-function summary(t,k){const L=k==="save"?["Deposited","Withdrawn","Saved"]:k==="invest"?["Contributed","Sold","Invested"]:["Income","Spent","Balance"];
-  const bal=t.inc-t.exp;
-  return `<div class="sum"><div><span class="mut">${L[0]}</span><b class="amt in">${fmt(t.inc)}</b></div><div><span class="mut">${L[1]}</span><b class="amt out">${fmt(t.exp)}</b></div><div><span class="mut">${L[2]}</span><b>${fmt(bal)}</b></div></div>`;
-}
-function limitBar(t,kind){
-  if(!t.lim)return "";
-  if(kind==="save"||kind==="invest"){const sv=t.inc-t.exp,p=Math.max(0,Math.min(100,sv/t.lim*100));
-    return `<div class="bar"><i style="width:${p}%"></i></div><div class="mut">${fmt(sv)} ${kind==="save"?"saved":"invested"} of ${fmt(t.lim)} goal (${Math.round(p)}%)</div>`}
-  const p=Math.min(100,t.exp/t.lim*100),left=t.lim-t.exp;
-  return `<div class="bar"><i class="${left<0?"over":""}" style="width:${p}%"></i></div><div class="mut">${left>=0?fmt(left)+" left of "+fmt(t.lim):fmt(-left)+" over "+fmt(t.lim)}</div>`;
-}
-function renderAll(){
-  const t=totals(S.budgets);
-  $("view").innerHTML=`<div class="card"><div class="mut">Total across all budgets</div><div class="big">${fmt(t.inc-t.exp)}</div>${summary(t)}${limitBar(t)}</div>`+
-  S.budgets.map(b=>{const x=totals([b]);return `<div class="card" data-go="${b.id}" style="cursor:pointer"><b>${esc(b.name)}</b>${summary(x,b.kind)}${limitBar(x,b.kind)}${b.kind==="invest"?gainLine(b,x):""}</div>`}).join("")+chart(S.budgets.filter(b=>!b.kind||b.kind==="spend"))+`<button class="btn ghost" id="expAll">Export all to CSV</button>`;
-  $("expAll").onclick=()=>exportCSV(S.budgets,"all-budgets");
-  document.querySelectorAll("[data-go]").forEach(el=>el.onclick=()=>{cur=el.dataset.go;render()});
-}
-function renderOne(b){
-  const t=totals([b]);
-  const list=[...b.tx].sort((a,c)=>c.date.localeCompare(a.date)||0);
-  $("view").innerHTML=`<div class="card"><div class="mut">${esc(b.name)} balance</div><div class="big">${fmt(t.inc-t.exp)}</div>${summary(t,b.kind)}${limitBar(t,b.kind)}</div>
-  <div class="card"><div class="row"><select id="type">${b.kind==="save"?'<option value="in">Deposit</option><option value="out">Withdraw</option>':b.kind==="invest"?'<option value="in">Contribute</option><option value="out">Sell / withdraw</option>':'<option value="out">Expense</option><option value="in">Income</option>'}</select><input id="amt" type="number" inputmode="decimal" placeholder="Amount"></div>
-  <div class="row" style="margin-top:8px"><input id="note" placeholder="Note / category"><input id="date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
-  <label class="chk"><input type="checkbox" id="rep"> Repeat monthly (recurring bill / income)</label>
-  <div style="margin-top:10px"><button class="btn" id="add">Add</button></div></div>
-  ${b.kind==="invest"?`<div class="card"><b>Performance</b><div style="margin-top:6px">${gainLine(b,t)}</div></div>`:""}${b.kind==="save"||b.kind==="invest"?"":chart([b])}
-  ${(S.rec||[]).filter(r=>r.bid===b.id).length?`<div class="card"><b>Recurring monthly</b>${S.rec.filter(r=>r.bid===b.id).map(r=>`<div class="tx"><div>${esc(r.note||r.cat)}<div class="mut">Next: ${r.next}</div></div><div><span class="amt ${r.type}">${fmt(r.amt)}</span><button class="x" data-r="${r.id}">×</button></div></div>`).join("")}</div>`:""}
-  <div class="card">${list.length?list.map(x=>`<div class="tx"><div><div>${esc(x.note||"—")}</div><div class="mut">${x.date}</div></div><div><span class="amt ${x.type}">${x.type==="in"?"+":"−"}${fmt(x.amt)}</span><button class="x" data-d="${x.id}">×</button></div></div>`).join(""):'<div class="mut">No transactions yet.</div>'}</div>
-  <div class="row">${b.kind==="invest"?'<button class="btn ghost" id="val">Update current value</button>':""}<button class="btn ghost" id="exp">Export CSV</button><button class="btn ghost" id="lim">${b.kind==="save"?"Set savings goal":b.kind==="invest"?"Set investment goal":"Set spending limit"}</button><button class="btn ghost" id="ren">Rename</button><button class="btn ghost" id="del">Delete budget</button></div>`;
-  $("add").onclick=()=>{const a=parseFloat($("amt").value);if(!(a>0))return;const o={type:$("type").value,amt:a,note:$("note").value.trim(),date:$("date").value||today()};
-    if($("rep").checked){S.rec=S.rec||[];S.rec.push({id:uid(),bid:b.id,...o,day:+o.date.slice(8),next:o.date});applyRec()}
-    else b.tx.push({id:uid(),...o});save()};
-  document.querySelectorAll("[data-r]").forEach(el=>el.onclick=async()=>{const v=await dlg({title:"Stop this recurring item?",msg:"Are you sure? Past transactions stay; future ones won't be added.",ok:"Stop it"});if(v){S.rec=S.rec.filter(r=>r.id!==el.dataset.r);save()}});
-  $("exp").onclick=()=>exportCSV([b],b.name.replace(/\W+/g,"-").toLowerCase());
-  document.querySelectorAll("[data-d]").forEach(el=>el.onclick=async()=>{const t=b.tx.find(x=>x.id===el.dataset.d);const v=await dlg({title:"Remove this transaction?",msg:"Are you sure you want to remove "+(t&&t.note?t.note+" ("+fmt(t.amt)+")":"it")+"?",ok:"Remove"});if(v){b.tx=b.tx.filter(x=>x.id!==el.dataset.d);save()}});
-  $("lim").onclick=async()=>{const sv=b.kind==="save";const v=await dlg({title:b.kind==="save"?"Savings goal":b.kind==="invest"?"Investment goal":"Spending limit",msg:"Use 0 for none.",fields:[{id:"v",label:"Amount",type:"number",value:b.limit||0}]});if(v){b.limit=parseFloat(v.v)||0;save()}};
-  if($("val"))$("val").onclick=async()=>{const v=await dlg({title:"Current value",msg:"What is this investment worth right now?",fields:[{id:"v",label:"Current value",type:"number",value:b.value??""}]});if(v&&v.v!==""){b.value=parseFloat(v.v)||0;save()}};
-  $("ren").onclick=async()=>{const v=await dlg({title:"Rename budget",fields:[{id:"n",label:"Name",value:b.name}]});if(v&&v.n.trim()){b.name=v.n.trim();save()}};
-  $("del").onclick=async()=>{const v=await dlg({title:"Delete "+b.name+"?",msg:"All its transactions will be removed.",ok:"Delete"});if(v){S.budgets=S.budgets.filter(x=>x.id!==b.id);S.rec=(S.rec||[]).filter(r=>r.bid!==b.id);cur="all";save()}};
-}
-lsGet();if(applyRec())save();else render();
-/* ===== FIREBASE: paste your config from Firebase console > Project settings > Your apps ===== */
-const firebaseConfig={apiKey:"AIzaSyA59Y5Ypgcrh7M8Cr8xsCpvLqO37g9bfqU",authDomain:"budgettrackerrr.firebaseapp.com",projectId:"budgettrackerrr",appId:"1:156105347018:web:2f9d80ceb2b6e86dd54933"};
-let fbOn=false,auth,fdb,unsub=null;
-try{if(firebaseConfig.apiKey!=="AIzaSyA59Y5Ypgcrh7M8Cr8xsCpvLqO37g9bfqU"){firebase.initializeApp(firebaseConfig);auth=firebase.auth();fdb=firebase.firestore();fdb.enablePersistence({synchronizeTabs:true}).catch(()=>{});fbOn=true}}catch(e){}
-async function signIn(){
-  const v=await dlg({title:"Sign in to sync",ok:"Continue",fields:[{id:"m",label:"Email",type:"email"},{id:"p",label:"Password",type:"password"},{id:"a",label:"Action",options:[["in","Sign in"],["up","Create account"]]}]});
-  if(!v)return;
-  try{v.a==="up"?await auth.createUserWithEmailAndPassword(v.m,v.p):await auth.signInWithEmailAndPassword(v.m,v.p)}catch(e){$("sync").textContent=e.message}}
-$("sync").style.cursor="pointer";
-$("sync").onclick=()=>{if(fbOn)auth.currentUser?auth.signOut():signIn()};
-if(fbOn){
-  auth.onAuthStateChanged(u=>{
-    if(unsub){unsub();unsub=null}ref=null;ready=false;
-    if(!u){$("sync").textContent="Tap to sign in & sync";return}
-    ref=fdb.collection("budgets").doc(u.uid);
-    unsub=ref.onSnapshot(snap=>{
-      if(snap.exists){const d=snap.data();
-        if(d&&d.json&&!snap.metadata.hasPendingWrites){try{S=JSON.parse(d.json);try{localStorage.setItem(KEY,d.json)}catch(e){}if(applyRec())save();else render()}catch(e){}}
-      }else if(!ready){ref.set({json:JSON.stringify(S)}).catch(()=>{})}
-      ready=true;$("sync").textContent="Synced ✓ (tap to sign out)";
-    },()=>{$("sync").textContent="Sync error"});
+
+
+/* =========================
+   DIALOG
+========================= */
+
+function dlg({title,msg,fields=[],ok="Save"}){
+  return new Promise(res=>{
+
+    const o=document.createElement("div");
+
+    o.style.cssText=
+      "position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px;z-index:9";
+
+    o.innerHTML=`
+      <div class="card" style="width:100%;max-width:360px;margin:0">
+
+        <b>${esc(title)}</b>
+
+        ${msg?`<p class="mut">${esc(msg)}</p>`:""}
+
+        ${fields.map(f=>`
+          <div style="margin-top:10px">
+
+            <label class="mut">
+              ${esc(f.label)}
+            </label>
+
+            ${
+              f.options
+              ?
+              `<select id="f_${f.id}" style="width:100%">
+                ${f.options.map(([v,l])=>
+                  `<option value="${v}">${esc(l)}</option>`
+                ).join("")}
+              </select>`
+              :
+              `<input
+                id="f_${f.id}"
+                type="${f.type||"text"}"
+                ${f.type==="number"?'inputmode="decimal"':""}
+                value="${esc(f.value??"")}"
+                style="width:100%"
+              >`
+            }
+
+          </div>
+        `).join("")}
+
+        <div class="row" style="margin-top:14px;justify-content:flex-end">
+
+          <button class="btn ghost" id="dn">
+            Cancel
+          </button>
+
+          <button class="btn" id="dy">
+            ${esc(ok)}
+          </button>
+
+        </div>
+
+      </div>
+    `;
+
+    document.body.appendChild(o);
+
+    const done=v=>{
+      o.remove();
+      res(v);
+    };
+
+    o.querySelector("#dn").onclick=()=>{
+      done(null);
+    };
+
+    o.querySelector("#dy").onclick=()=>{
+
+      const v={};
+
+      fields.forEach(f=>{
+        v[f.id]=o.querySelector("#f_"+f.id).value;
+      });
+
+      done(v);
+    };
+
+    const i=o.querySelector("input");
+
+    if(i)i.focus();
+
   });
-}else $("sync").textContent="Add Firebase config to sync";
+}
+
+
+/* =========================
+   DATE HELPERS
+========================= */
+
+const pad=n=>String(n).padStart(2,"0");
+
+const stamp=()=>{
+
+  const d=new Date();
+
+  return d.getFullYear()+"-"+
+    pad(d.getMonth()+1)+"-"+
+    pad(d.getDate())+"_"+
+    pad(d.getHours())+"-"+
+    pad(d.getMinutes());
+
+};
+
+const today=()=>{
+
+  const d=new Date();
+
+  return d.getFullYear()+"-"+
+    pad(d.getMonth()+1)+"-"+
+    pad(d.getDate());
+
+};
+
+
+/* =========================
+   RECURRING
+========================= */
+
+function applyRec(){
+
+  S.rec=S.rec||[];
+
+  let ch=false;
+
+  const td=today();
+
+  S.rec.forEach(r=>{
+
+    const b=S.budgets.find(x=>x.id===r.bid);
+
+    if(!b)return;
+
+    let n=0;
+
+    while(r.next<=td&&n++<60){
+
+      const id="r"+r.id+r.next;
+
+      if(!b.tx.some(t=>t.id===id)){
+
+        b.tx.push({
+          id,
+          type:r.type,
+          amt:r.amt,
+          note:r.note,
+          cat:r.cat,
+          date:r.next
+        });
+
+      }
+
+      const [y,m]=r.next.split("-").map(Number);
+
+      const d=new Date(y,m,1);
+
+      r.next=
+        d.getFullYear()+"-"+
+        pad(d.getMonth()+1)+"-"+
+        pad(Math.min(r.day,28));
+
+      ch=true;
+
+    }
+
+  });
+
+  return ch;
+}
+
+
+/* =========================
+   INVESTMENT GAINS
+========================= */
+
+function gainLine(b,t){
+
+  const inv=t.inc-t.exp;
+
+  if(b.value==null)
+    return `<div class="mut">Set current value to track gains</div>`;
+
+  const g=b.value-inv;
+
+  const p=inv>0?g/inv*100:0;
+
+  return `
+    <div class="mut">
+      Value ${fmt(b.value)} ·
+
+      <span class="amt ${g>=0?"in":"out"}">
+        ${g>=0?"+":"−"}${fmt(Math.abs(g))}
+        (${p.toFixed(1)}%)
+      </span>
+
+    </div>
+  `;
+}
+
+
+/* =========================
+   CHART
+========================= */
+
+function chart(list){
+
+  const m={};
+
+  let tot=0;
+
+  list.forEach(b=>
+    b.tx.forEach(t=>{
+
+      if(t.type==="out"){
+
+        const raw=
+          (t.note||t.cat||"No note").trim();
+
+        const c=
+          raw.charAt(0).toUpperCase()+
+          raw.slice(1).toLowerCase();
+
+        m[c]=(m[c]||0)+t.amt;
+
+        tot+=t.amt;
+
+      }
+
+    })
+  );
+
+  const e=
+    Object.entries(m)
+    .sort((a,b)=>b[1]-a[1]);
+
+  return `
+    <div class="card">
+
+      <b>Spending by note / category</b>
+
+      ${
+        e.length
+        ?
+        e.map(([c,v])=>`
+
+          <div class="row2">
+
+            <span>${esc(c)}</span>
+
+            <span class="mut">
+              ${fmt(v)} ·
+              ${Math.round(v/tot*100)}%
+            </span>
+
+          </div>
+
+          <div class="bar" style="margin:4px 0">
+
+            <i style="width:${v/tot*100}%"></i>
+
+          </div>
+
+        `).join("")
+        :
+        `<div class="mut">No expenses yet.</div>`
+      }
+
+    </div>
+  `;
+}
+
+
+/* =========================
+   CSV
+========================= */
+
+function exportCSV(list,name){
+
+  const q=v=>
+    '"'+String(v).replace(/"/g,'""')+'"';
+
+  const rows=[
+    ["Budget","Date","Type","Note","Amount"].join(",")
+  ];
+
+  list.forEach(b=>
+    b.tx.forEach(t=>
+
+      rows.push([
+        b.name,
+        t.date,
+        t.type==="in"?"Income":"Expense",
+        t.note||t.cat||"",
+        t.amt
+      ].map(q).join(","))
+
+    )
+  );
+
+  const a=document.createElement("a");
+
+  a.href=
+    URL.createObjectURL(
+      new Blob(
+        [rows.join("\n")],
+        {type:"text/csv"}
+      )
+    );
+
+  a.download=
+    name+"_"+stamp()+".csv";
+
+  document.body.appendChild(a);
+
+  a.click();
+
+  a.remove();
+}
+
+
+/* =========================
+   LOCAL STORAGE
+========================= */
+
+function lsGet(){
+
+  try{
+
+    const v=localStorage.getItem(KEY);
+
+    if(v)
+      S=JSON.parse(v);
+
+  }catch(e){
+
+    console.error(e);
+
+  }
+
+}
+
+
+/* =========================
+   SAVE
+========================= */
+
+async function save(){
+
+  try{
+
+    const json=JSON.stringify(S);
+
+    /* Save locally first */
+
+    localStorage.setItem(KEY,json);
+
+    render();
+
+
+    /* Save to Firebase */
+
+    if(
+      fbOn &&
+      auth &&
+      auth.currentUser &&
+      ref
+    ){
+
+      saving=true;
+
+      $("sync").textContent="Saving...";
+
+      await ref.set({
+
+        json:json,
+
+        updatedAt:
+          firebase.firestore.FieldValue.serverTimestamp()
+
+      });
+
+      saving=false;
+
+      $("sync").textContent="Synced ✓";
+
+    }
+
+  }catch(e){
+
+    saving=false;
+
+    console.error("Save error:",e);
+
+    $("sync").textContent="Sync error";
+
+  }
+
+}
+
+
+/* =========================
+   TOTALS
+========================= */
+
+function totals(list){
+
+  let inc=0;
+  let exp=0;
+  let lim=0;
+
+  list.forEach(b=>{
+
+    if(
+      b.kind!=="save" &&
+      b.kind!=="invest"
+    )
+      lim+=+b.limit||0;
+
+    b.tx.forEach(t=>
+      t.type==="in"
+      ?inc+=t.amt
+      :exp+=t.amt
+    );
+
+  });
+
+  return{
+    inc,
+    exp,
+    lim
+  };
+
+}
+
+
+/* =========================
+   RENDER
+========================= */
+
+function render(){
+
+  const tabs=$("tabs");
+
+  tabs.innerHTML=[
+    {
+      id:"all",
+      name:"Overview"
+    },
+    ...S.budgets
+  ]
+  .map(b=>`
+
+    <button
+      class="tab ${b.id===cur?"on":""}"
+      data-t="${b.id}"
+    >
+      ${esc(b.name)}
+    </button>
+
+  `)
+  .join("")+
+
+  `
+    <button class="tab" id="addB">
+      + New
+    </button>
+  `;
+
+
+  tabs
+    .querySelectorAll("[data-t]")
+    .forEach(el=>
+      el.onclick=()=>{
+        cur=el.dataset.t;
+        render();
+      }
+    );
+
+
+  $("addB").onclick=async()=>{
+
+    const v=await dlg({
+
+      title:"New budget",
+
+      ok:"Create",
+
+      fields:[
+
+        {
+          id:"n",
+          label:"Name",
+          value:""
+        },
+
+        {
+          id:"k",
+          label:"Type",
+          options:[
+            ["spend","Spending budget"],
+            ["save","Savings"],
+            ["invest","Investment"]
+          ]
+        },
+
+        {
+          id:"g",
+          label:"Goal (optional, savings/investment only)",
+          type:"number",
+          value:""
+        }
+
+      ]
+
+    });
+
+
+    if(v&&v.n.trim()){
+
+      const b={
+
+        id:uid(),
+
+        name:v.n.trim(),
+
+        kind:v.k,
+
+        limit:
+          v.k!=="spend"
+          ?parseFloat(v.g)||0
+          :0,
+
+        tx:[]
+
+      };
+
+      S.budgets.push(b);
+
+      cur=b.id;
+
+      save();
+
+    }
+
+  };
+
+
+  if(
+    cur!=="all" &&
+    !S.budgets.find(b=>b.id===cur)
+  )
+    cur="all";
+
+
+  cur==="all"
+    ?renderAll()
+    :renderOne(
+        S.budgets.find(b=>b.id===cur)
+      );
+
+}
+
+
+/* =========================
+   SUMMARY
+========================= */
+
+function summary(t,k){
+
+  const L=
+    k==="save"
+    ?["Deposited","Withdrawn","Saved"]
+    :
+    k==="invest"
+    ?["Contributed","Sold","Invested"]
+    :
+    ["Income","Spent","Balance"];
+
+  const bal=t.inc-t.exp;
+
+  return `
+
+    <div class="sum">
+
+      <div>
+        <span class="mut">${L[0]}</span>
+        <b class="amt in">
+          ${fmt(t.inc)}
+        </b>
+      </div>
+
+      <div>
+        <span class="mut">${L[1]}</span>
+        <b class="amt out">
+          ${fmt(t.exp)}
+        </b>
+      </div>
+
+      <div>
+        <span class="mut">${L[2]}</span>
+        <b>
+          ${fmt(bal)}
+        </b>
+      </div>
+
+    </div>
+
+  `;
+
+}
+
+
+/* =========================
+   LIMIT BAR
+========================= */
+
+function limitBar(t,kind){
+
+  if(!t.lim)return "";
+
+  if(
+    kind==="save" ||
+    kind==="invest"
+  ){
+
+    const sv=t.inc-t.exp;
+
+    const p=
+      Math.max(
+        0,
+        Math.min(
+          100,
+          sv/t.lim*100
+        )
+      );
+
+    return `
+
+      <div class="bar">
+        <i style="width:${p}%"></i>
+      </div>
+
+      <div class="mut">
+
+        ${fmt(sv)}
+        ${kind==="save"?"saved":"invested"}
+        of ${fmt(t.lim)}
+        goal (${Math.round(p)}%)
+
+      </div>
+
+    `;
+
+  }
+
+  const p=
+    Math.min(
+      100,
+      t.exp/t.lim*100
+    );
+
+  const left=t.lim-t.exp;
+
+  return `
+
+    <div class="bar">
+
+      <i
+        class="${left<0?"over":""}"
+        style="width:${p}%"
+      ></i>
+
+    </div>
+
+    <div class="mut">
+
+      ${
+        left>=0
+        ?fmt(left)+" left of "+fmt(t.lim)
+        :fmt(-left)+" over "+fmt(t.lim)
+      }
+
+    </div>
+
+  `;
+
+}
+
+
+/* =========================
+   OVERVIEW
+========================= */
+
+function renderAll(){
+
+  const t=totals(S.budgets);
+
+  $("view").innerHTML=
+
+  `
+    <div class="card">
+
+      <div class="mut">
+        Total across all budgets
+      </div>
+
+      <div class="big">
+        ${fmt(t.inc-t.exp)}
+      </div>
+
+      ${summary(t)}
+      ${limitBar(t)}
+
+    </div>
+  `+
+
+  S.budgets.map(b=>{
+
+    const x=totals([b]);
+
+    return `
+
+      <div
+        class="card"
+        data-go="${b.id}"
+        style="cursor:pointer"
+      >
+
+        <b>${esc(b.name)}</b>
+
+        ${summary(x,b.kind)}
+
+        ${limitBar(x,b.kind)}
+
+        ${
+          b.kind==="invest"
+          ?gainLine(b,x)
+          :""
+        }
+
+      </div>
+
+    `;
+
+  }).join("")+
+
+  chart(
+    S.budgets.filter(
+      b=>!b.kind||b.kind==="spend"
+    )
+  )+
+
+  `
+    <button
+      class="btn ghost"
+      id="expAll"
+    >
+      Export all to CSV
+    </button>
+  `;
+
+
+  $("expAll").onclick=()=>
+    exportCSV(
+      S.budgets,
+      "all-budgets"
+    );
+
+
+  document
+    .querySelectorAll("[data-go]")
+    .forEach(el=>
+      el.onclick=()=>{
+        cur=el.dataset.go;
+        render();
+      }
+    );
+
+}
+
+
+/* =========================
+   INDIVIDUAL BUDGET
+========================= */
+
+function renderOne(b){
+
+  const t=totals([b]);
+
+  const list=
+    [...b.tx]
+    .sort(
+      (a,c)=>
+        c.date.localeCompare(a.date)||0
+    );
+
+
+  $("view").innerHTML=
+
+  `
+    <div class="card">
+
+      <div class="mut">
+        ${esc(b.name)} balance
+      </div>
+
+      <div class="big">
+        ${fmt(t.inc-t.exp)}
+      </div>
+
+      ${summary(t,b.kind)}
+
+      ${limitBar(t,b.kind)}
+
+    </div>
+
+
+    <div class="card">
+
+      <div class="row">
+
+        <select id="type">
+
+          ${
+            b.kind==="save"
+
+            ?
+            `
+              <option value="in">
+                Deposit
+              </option>
+
+              <option value="out">
+                Withdraw
+              </option>
+            `
+
+            :
+
+            b.kind==="invest"
+
+            ?
+            `
+              <option value="in">
+                Contribute
+              </option>
+
+              <option value="out">
+                Sell / withdraw
+              </option>
+            `
+
+            :
+            `
+              <option value="out">
+                Expense
+              </option>
+
+              <option value="in">
+                Income
+              </option>
+            `
+          }
+
+        </select>
+
+        <input
+          id="amt"
+          type="number"
+          inputmode="decimal"
+          placeholder="Amount"
+        >
+
+      </div>
+
+
+      <div
+        class="row"
+        style="margin-top:8px"
+      >
+
+        <input
+          id="note"
+          placeholder="Note / category"
+        >
+
+        <input
+          id="date"
+          type="date"
+          value="${today()}"
+        >
+
+      </div>
+
+
+      <label class="chk">
+
+        <input
+          type="checkbox"
+          id="rep"
+        >
+
+        Repeat monthly
+        (recurring bill / income)
+
+      </label>
+
+
+      <div style="margin-top:10px">
+
+        <button
+          class="btn"
+          id="add"
+        >
+          Add
+        </button>
+
+      </div>
+
+    </div>
+
+
+    ${
+      b.kind==="invest"
+
+      ?
+      `
+        <div class="card">
+
+          <b>Performance</b>
+
+          <div style="margin-top:6px">
+            ${gainLine(b,t)}
+          </div>
+
+        </div>
+      `
+
+      :""
+    }
+
+
+    ${
+      b.kind==="save" ||
+      b.kind==="invest"
+      ?""
+      :chart([b])
+    }
+
+
+    ${
+      (S.rec||[]).filter(
+        r=>r.bid===b.id
+      ).length
+
+      ?
+
+      `
+        <div class="card">
+
+          <b>Recurring monthly</b>
+
+          ${
+            S.rec
+            .filter(r=>r.bid===b.id)
+            .map(r=>`
+
+              <div class="tx">
+
+                <div>
+
+                  ${esc(r.note||r.cat)}
+
+                  <div class="mut">
+                    Next: ${r.next}
+                  </div>
+
+                </div>
+
+                <div>
+
+                  <span class="amt ${r.type}">
+                    ${fmt(r.amt)}
+                  </span>
+
+                  <button
+                    class="x"
+                    data-r="${r.id}"
+                  >
+                    ×
+                  </button>
+
+                </div>
+
+              </div>
+
+            `).join("")
+          }
+
+        </div>
+      `
+
+      :""
+    }
+
+
+    <div class="card">
+
+      ${
+        list.length
+
+        ?
+
+        list.map(x=>`
+
+          <div class="tx">
+
+            <div>
+
+              <div>
+                ${esc(x.note||"—")}
+              </div>
+
+              <div class="mut">
+                ${x.date}
+              </div>
+
+            </div>
+
+            <div>
+
+              <span class="amt ${x.type}">
+
+                ${x.type==="in"?"+":"−"}
+                ${fmt(x.amt)}
+
+              </span>
+
+              <button
+                class="x"
+                data-d="${x.id}"
+              >
+                ×
+              </button>
+
+            </div>
+
+          </div>
+
+        `).join("")
+
+        :
+
+        `<div class="mut">
+          No transactions yet.
+        </div>`
+
+      }
+
+    </div>
+
+
+    <div class="row">
+
+      ${
+        b.kind==="invest"
+
+        ?
+        `
+          <button
+            class="btn ghost"
+            id="val"
+          >
+            Update current value
+          </button>
+        `
+
+        :""
+      }
+
+
+      <button
+        class="btn ghost"
+        id="exp"
+      >
+        Export CSV
+      </button>
+
+
+      <button
+        class="btn ghost"
+        id="lim"
+      >
+        ${
+          b.kind==="save"
+          ?"Set savings goal"
+          :
+          b.kind==="invest"
+          ?"Set investment goal"
+          :
+          "Set spending limit"
+        }
+      </button>
+
+
+      <button
+        class="btn ghost"
+        id="ren"
+      >
+        Rename
+      </button>
+
+
+      <button
+        class="btn ghost"
+        id="del"
+      >
+        Delete budget
+      </button>
+
+    </div>
+
+  `;
+
+
+  $("add").onclick=()=>{
+
+    const a=
+      parseFloat(
+        $("amt").value
+      );
+
+    if(!(a>0))return;
+
+    const o={
+
+      type:$("type").value,
+
+      amt:a,
+
+      note:
+        $("note").value.trim(),
+
+      date:
+        $("date").value||today()
+
+    };
+
+
+    if($("rep").checked){
+
+      S.rec=S.rec||[];
+
+      S.rec.push({
+
+        id:uid(),
+
+        bid:b.id,
+
+        ...o,
+
+        day:+o.date.slice(8),
+
+        next:o.date
+
+      });
+
+      applyRec();
+
+    }
+
+    else{
+
+      b.tx.push({
+
+        id:uid(),
+
+        ...o
+
+      });
+
+    }
+
+    save();
+
+  };
+
+
+  document
+    .querySelectorAll("[data-r]")
+    .forEach(el=>
+
+      el.onclick=async()=>{
+
+        const v=await dlg({
+
+          title:
+            "Stop this recurring item?",
+
+          msg:
+            "Are you sure? Past transactions stay; future ones won't be added.",
+
+          ok:
+            "Stop it"
+
+        });
+
+        if(v){
+
+          S.rec=
+            S.rec.filter(
+              r=>r.id!==el.dataset.r
+            );
+
+          save();
+
+        }
+
+      }
+
+    );
+
+
+  $("exp").onclick=()=>
+    exportCSV(
+      [b],
+      b.name
+        .replace(/\W+/g,"-")
+        .toLowerCase()
+    );
+
+
+  document
+    .querySelectorAll("[data-d]")
+    .forEach(el=>
+
+      el.onclick=async()=>{
+
+        const t=
+          b.tx.find(
+            x=>x.id===el.dataset.d
+          );
+
+        const v=await dlg({
+
+          title:
+            "Remove this transaction?",
+
+          msg:
+            "Are you sure you want to remove "+
+            (
+              t&&t.note
+              ?t.note+" ("+fmt(t.amt)+")"
+              :"it"
+            )+"?",
+
+          ok:
+            "Remove"
+
+        });
+
+        if(v){
+
+          b.tx=
+            b.tx.filter(
+              x=>x.id!==el.dataset.d
+            );
+
+          save();
+
+        }
+
+      }
+
+    );
+
+
+  $("lim").onclick=async()=>{
+
+    const v=await dlg({
+
+      title:
+        b.kind==="save"
+        ?"Savings goal"
+        :
+        b.kind==="invest"
+        ?"Investment goal"
+        :
+        "Spending limit",
+
+      msg:
+        "Use 0 for none.",
+
+      fields:[{
+
+        id:"v",
+
+        label:"Amount",
+
+        type:"number",
+
+        value:b.limit||0
+
+      }]
+
+    });
+
+    if(v){
+
+      b.limit=
+        parseFloat(v.v)||0;
+
+      save();
+
+    }
+
+  };
+
+
+  if($("val"))
+
+    $("val").onclick=async()=>{
+
+      const v=await dlg({
+
+        title:
+          "Current value",
+
+        msg:
+          "What is this investment worth right now?",
+
+        fields:[{
+
+          id:"v",
+
+          label:"Current value",
+
+          type:"number",
+
+          value:b.value??""
+
+        }]
+
+      });
+
+      if(
+        v &&
+        v.v!==""
+      ){
+
+        b.value=
+          parseFloat(v.v)||0;
+
+        save();
+
+      }
+
+    };
+
+
+  $("ren").onclick=async()=>{
+
+    const v=await dlg({
+
+      title:
+        "Rename budget",
+
+      fields:[{
+
+        id:"n",
+
+        label:"Name",
+
+        value:b.name
+
+      }]
+
+    });
+
+    if(
+      v &&
+      v.n.trim()
+    ){
+
+      b.name=
+        v.n.trim();
+
+      save();
+
+    }
+
+  };
+
+
+  $("del").onclick=async()=>{
+
+    const v=await dlg({
+
+      title:
+        "Delete "+b.name+"?",
+
+      msg:
+        "All its transactions will be removed.",
+
+      ok:
+        "Delete"
+
+    });
+
+    if(v){
+
+      S.budgets=
+        S.budgets.filter(
+          x=>x.id!==b.id
+        );
+
+      S.rec=
+        (S.rec||[]).filter(
+          r=>r.bid!==b.id
+        );
+
+      cur="all";
+
+      save();
+
+    }
+
+  };
+
+}
+
+
+/* =========================
+   FIREBASE CONFIG
+========================= */
+
+const firebaseConfig={
+
+  apiKey:
+    "AIzaSyA59Y5Ypgcrh7M8Cr8xsCpvLqO37g9bfqU",
+
+  authDomain:
+    "budgettrackerrr.firebaseapp.com",
+
+  projectId:
+    "budgettrackerrr",
+
+  appId:
+    "1:156105347018:web:2f9d80ceb2b6e86dd54933"
+
+};
+
+
+/* =========================
+   FIREBASE INITIALIZATION
+========================= */
+
+try{
+
+  firebase.initializeApp(
+    firebaseConfig
+  );
+
+  auth=firebase.auth();
+
+  fdb=firebase.firestore();
+
+
+  /* KEEP USER SIGNED IN */
+
+  auth.setPersistence(
+    firebase.auth.Auth.Persistence.LOCAL
+  ).catch(e=>{
+    console.error(
+      "Persistence error:",
+      e
+    );
+  });
+
+
+  /* FIRESTORE OFFLINE CACHE */
+
+  fdb.enablePersistence({
+    synchronizeTabs:true
+  }).catch(e=>{
+    console.log(
+      "Firestore persistence:",
+      e
+    );
+  });
+
+
+  fbOn=true;
+
+}catch(e){
+
+  console.error(
+    "Firebase initialization error:",
+    e
+  );
+
+  $("sync").textContent=
+    "Firebase error";
+
+}
+
+
+/* =========================
+   SIGN IN / CREATE ACCOUNT
+========================= */
+
+async function signIn(){
+
+  const v=await dlg({
+
+    title:
+      "Cloud Sync",
+
+    msg:
+      "Sign in or create an account to sync your budgets across your devices.",
+
+    ok:
+      "Continue",
+
+    fields:[
+
+      {
+        id:"m",
+        label:"Email",
+        type:"email"
+      },
+
+      {
+        id:"p",
+        label:"Password",
+        type:"password"
+      },
+
+      {
+        id:"a",
+        label:"Action",
+
+        options:[
+          ["in","Sign in"],
+          ["up","Create account"]
+        ]
+
+      }
+
+    ]
+
+  });
+
+
+  if(!v)return;
+
+
+  try{
+
+    if(!v.m||!v.p){
+
+      $("sync").textContent=
+        "Enter email and password";
+
+      return;
+
+    }
+
+
+    /* EXPLICITLY USE LOCAL PERSISTENCE */
+
+    await auth.setPersistence(
+      firebase.auth.Auth.Persistence.LOCAL
+    );
+
+
+    if(v.a==="up"){
+
+      await auth.createUserWithEmailAndPassword(
+        v.m,
+        v.p
+      );
+
+    }
+
+    else{
+
+      await auth.signInWithEmailAndPassword(
+        v.m,
+        v.p
+      );
+
+    }
+
+
+  }catch(e){
+
+    console.error(e);
+
+    let message=
+      "Unable to sign in.";
+
+
+    if(
+      e.code==="auth/configuration-not-found"
+    ){
+
+      message=
+        "Enable Email/Password in Firebase Authentication.";
+
+    }
+
+    else if(
+      e.code==="auth/email-already-in-use"
+    ){
+
+      message=
+        "That email already has an account.";
+
+    }
+
+    else if(
+      e.code==="auth/invalid-email"
+    ){
+
+      message=
+        "Invalid email address.";
+
+    }
+
+    else if(
+      e.code==="auth/weak-password"
+    ){
+
+      message=
+        "Password must be at least 6 characters.";
+
+    }
+
+    else if(
+      e.code==="auth/wrong-password"||
+      e.code==="auth/invalid-credential"
+    ){
+
+      message=
+        "Incorrect email or password.";
+
+    }
+
+    else if(
+      e.code==="auth/user-not-found"
+    ){
+
+      message=
+        "No account exists with that email.";
+
+    }
+
+
+    $("sync").textContent=
+      message;
+
+  }
+
+}
+
+
+/* =========================
+   SYNC BUTTON
+========================= */
+
+$("sync").onclick=()=>{
+
+  if(!fbOn){
+
+    $("sync").textContent=
+      "Firebase unavailable";
+
+    return;
+
+  }
+
+
+  if(auth.currentUser){
+
+    auth.signOut();
+
+  }
+
+  else{
+
+    signIn();
+
+  }
+
+};
+
+
+/* =========================
+   FIREBASE AUTH STATE
+========================= */
+
+if(fbOn){
+
+  auth.onAuthStateChanged(
+    async user=>{
+
+      /* Remove old listener */
+
+      if(unsub){
+
+        unsub();
+
+        unsub=null;
+
+      }
+
+
+      ref=null;
+
+      ready=false;
+
+
+      /* NOT SIGNED IN */
+
+      if(!user){
+
+        $("sync").textContent=
+          "Tap to sign in & sync";
+
+        return;
+
+      }
+
+
+      /* USER-SPECIFIC DOCUMENT */
+
+      ref=
+        fdb
+        .collection("budgets")
+        .doc(user.uid);
+
+
+      /* REAL-TIME FIRESTORE SYNC */
+
+      unsub=
+        ref.onSnapshot(
+
+          async snap=>{
+
+            try{
+
+              if(snap.exists){
+
+                const data=
+                  snap.data();
+
+
+                if(
+                  data &&
+                  data.json &&
+                  !snap.metadata.hasPendingWrites &&
+                  !saving
+                ){
+
+                  S=
+                    JSON.parse(
+                      data.json
+                    );
+
+
+                  try{
+
+                    localStorage.setItem(
+                      KEY,
+                      data.json
+                    );
+
+                  }catch(e){}
+
+
+                  render();
+
+                }
+
+              }
+
+
+              /* FIRST TIME THIS USER LOGS IN */
+
+              else if(!ready){
+
+                const json=
+                  JSON.stringify(S);
+
+                await ref.set({
+
+                  json:json,
+
+                  updatedAt:
+                    firebase.firestore.FieldValue.serverTimestamp()
+
+                });
+
+              }
+
+
+              ready=true;
+
+              $("sync").textContent=
+                "Synced ✓";
+
+
+            }catch(e){
+
+              console.error(
+                "Firestore sync error:",
+                e
+              );
+
+              $("sync").textContent=
+                "Sync error";
+
+            }
+
+          },
+
+
+          error=>{
+
+            console.error(
+              "Firestore listener error:",
+              error
+            );
+
+            $("sync").textContent=
+              "Firestore permission error";
+
+          }
+
+        );
+
+    }
+
+  );
+
+}
+
+else{
+
+  $("sync").textContent=
+    "Firebase failed to initialize";
+
+}
+
+
+/* =========================
+   START APP
+========================= */
+
+lsGet();
+
+if(applyRec())
+  save();
+else
+  render();
+
 </script>
+
 </body>
 </html>

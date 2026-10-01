@@ -36,12 +36,14 @@ input,select{flex:1;min-width:110px;padding:10px;border:1px solid var(--bd);bord
 .btn.ghost{background:none;color:var(--mut);border:1px solid var(--bd);font-weight:400}
 .tx{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid var(--bd)}
 .tx:first-child{border-top:0}
-.amt.in{color:var(--good)}.amt.out{color:var(--bad)}
+.amt.in{color:var(--good)}
+.amt.out{color:var(--bad)}
 .x{background:none;border:0;color:var(--mut);font-size:18px;cursor:pointer;padding:4px 8px}
 .sum{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center}
 .sum b{display:block;font-size:17px}
 .row2{display:flex;justify-content:space-between;font-size:14px;margin-top:10px}
-.chk{display:flex;align-items:center;gap:8px;margin-top:10px;color:var(--mut);font-size:14px}.chk input{flex:none;min-width:0}
+.chk{display:flex;align-items:center;gap:8px;margin-top:10px;color:var(--mut);font-size:14px}
+.chk input{flex:none;min-width:0}
 </style>
 </head>
 
@@ -56,7 +58,6 @@ input,select{flex:1;min-width:110px;padding:10px;border:1px solid var(--bd);bord
 
 <div class="tabs" id="tabs"></div>
 <div id="view"></div>
- 
 
 <div style="
   text-align:center;
@@ -68,6 +69,7 @@ input,select{flex:1;min-width:110px;padding:10px;border:1px solid var(--bd);bord
 ">
   made by vlad
 </div>
+
 </main>
 
 <script>
@@ -396,7 +398,7 @@ function chart(list){
 
 
 /* =========================
-   CSV
+   CSV EXPORT
 ========================= */
 
 function exportCSV(list,name){
@@ -404,33 +406,194 @@ function exportCSV(list,name){
   const q=v=>
     '"'+String(v).replace(/"/g,'""')+'"';
 
-  const rows=[
-    ["Budget","Date","Type","Note","Amount"].join(",")
-  ];
+  let totalIncome=0;
+  let totalExpense=0;
 
-  list.forEach(b=>
-    b.tx.forEach(t=>
+  const transactions=[];
 
-      rows.push([
-        b.name,
-        t.date,
-        t.type==="in"?"Income":"Expense",
-        t.note||t.cat||"",
-        t.amt
-      ].map(q).join(","))
 
-    )
-  );
+  /* BUILD TRANSACTIONS */
 
-  const a=document.createElement("a");
+  list.forEach(b=>{
 
-  a.href=
-    URL.createObjectURL(
-      new Blob(
-        [rows.join("\n")],
-        {type:"text/csv"}
-      )
+    let balance=0;
+
+    const sorted=
+      [...b.tx].sort(
+        (a,c)=>
+          a.date.localeCompare(c.date)
+      );
+
+    sorted.forEach(t=>{
+
+      const amount=
+        Number(t.amt)||0;
+
+
+      if(t.type==="in"){
+
+        totalIncome+=amount;
+
+        balance+=amount;
+
+      }else{
+
+        totalExpense+=amount;
+
+        balance-=amount;
+
+      }
+
+
+      transactions.push({
+
+        budget:b.name,
+
+        date:t.date,
+
+        type:
+          t.type==="in"
+          ?"Income"
+          :"Expense",
+
+        note:
+          t.note||t.cat||"",
+
+        amount,
+
+        balance,
+
+        color:
+          t.type==="in"
+          ?"GREEN"
+          :"RED"
+
+      });
+
+    });
+
+  });
+
+
+  const finalBalance=
+    totalIncome-totalExpense;
+
+
+  const rows=[];
+
+
+  /* SUMMARY */
+
+  rows.push([
+    "BUDGET SUMMARY",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ].map(q).join(","));
+
+
+  rows.push([
+    "Total Income",
+    totalIncome,
+    "",
+    "",
+    "",
+    "GREEN",
+    ""
+  ].map(q).join(","));
+
+
+  rows.push([
+    "Total Expenses",
+    totalExpense,
+    "",
+    "",
+    "",
+    "RED",
+    ""
+  ].map(q).join(","));
+
+
+  rows.push([
+    "Total Amount Left",
+    finalBalance,
+    "",
+    "",
+    "",
+    finalBalance>=0
+      ?"GREEN"
+      :"RED",
+    ""
+  ].map(q).join(","));
+
+
+  rows.push("");
+
+
+  /* TRANSACTION HEADER */
+
+  rows.push([
+    "Budget",
+    "Date",
+    "Type",
+    "Note / Category",
+    "Amount",
+    "Color",
+    "Amount Left"
+  ].map(q).join(","));
+
+
+  /* TRANSACTIONS */
+
+  transactions.forEach(t=>{
+
+    rows.push([
+
+      t.budget,
+
+      t.date,
+
+      t.type,
+
+      t.note,
+
+      t.type==="Income"
+        ?"+"+t.amount
+        :"-"+t.amount,
+
+      t.color,
+
+      t.balance
+
+    ].map(q).join(","));
+
+  });
+
+
+  const csv=
+    rows.join("\n");
+
+
+  const blob=
+    new Blob(
+      ["\ufeff"+csv],
+      {
+        type:"text/csv;charset=utf-8;"
+      }
     );
+
+
+  const url=
+    URL.createObjectURL(blob);
+
+
+  const a=
+    document.createElement("a");
+
+  a.href=url;
 
   a.download=
     name+"_"+stamp()+".csv";
@@ -440,6 +603,9 @@ function exportCSV(list,name){
   a.click();
 
   a.remove();
+
+  URL.revokeObjectURL(url);
+
 }
 
 
@@ -473,16 +639,16 @@ async function save(){
 
   try{
 
-    const json=JSON.stringify(S);
+    const json=
+      JSON.stringify(S);
 
-    /* Save locally first */
-
-    localStorage.setItem(KEY,json);
+    localStorage.setItem(
+      KEY,
+      json
+    );
 
     render();
 
-
-    /* Save to Firebase */
 
     if(
       fbOn &&
@@ -493,7 +659,8 @@ async function save(){
 
       saving=true;
 
-      $("sync").textContent="Saving...";
+      $("sync").textContent=
+        "Saving...";
 
       await ref.set({
 
@@ -506,7 +673,8 @@ async function save(){
 
       saving=false;
 
-      $("sync").textContent="Synced ✓";
+      $("sync").textContent=
+        "Synced ✓";
 
     }
 
@@ -514,9 +682,13 @@ async function save(){
 
     saving=false;
 
-    console.error("Save error:",e);
+    console.error(
+      "Save error:",
+      e
+    );
 
-    $("sync").textContent="Sync error";
+    $("sync").textContent=
+      "Sync error";
 
   }
 
@@ -539,12 +711,19 @@ function totals(list){
       b.kind!=="save" &&
       b.kind!=="invest"
     )
-      lim+=+b.limit||0;
+
+      lim+=
+        +b.limit||0;
+
 
     b.tx.forEach(t=>
+
       t.type==="in"
+
       ?inc+=t.amt
+
       :exp+=t.amt
+
     );
 
   });
@@ -567,12 +746,16 @@ function render(){
   const tabs=$("tabs");
 
   tabs.innerHTML=[
+
     {
       id:"all",
       name:"Overview"
     },
+
     ...S.budgets
+
   ]
+
   .map(b=>`
 
     <button
@@ -583,10 +766,14 @@ function render(){
     </button>
 
   `)
+
   .join("")+
 
   `
-    <button class="tab" id="addB">
+    <button
+      class="tab"
+      id="addB"
+    >
       + New
     </button>
   `;
@@ -595,92 +782,136 @@ function render(){
   tabs
     .querySelectorAll("[data-t]")
     .forEach(el=>
+
       el.onclick=()=>{
+
         cur=el.dataset.t;
+
         render();
+
       }
+
     );
 
 
-  $("addB").onclick=async()=>{
+  $("addB").onclick=
+    async()=>{
 
-    const v=await dlg({
+      const v=
+        await dlg({
 
-      title:"New budget",
+          title:
+            "New budget",
 
-      ok:"Create",
+          ok:
+            "Create",
 
-      fields:[
+          fields:[
 
-        {
-          id:"n",
-          label:"Name",
-          value:""
-        },
+            {
+              id:"n",
+              label:"Name",
+              value:""
+            },
 
-        {
-          id:"k",
-          label:"Type",
-          options:[
-            ["spend","Spending budget"],
-            ["save","Savings"],
-            ["invest","Investment"]
+            {
+              id:"k",
+              label:"Type",
+
+              options:[
+
+                [
+                  "spend",
+                  "Spending budget"
+                ],
+
+                [
+                  "save",
+                  "Savings"
+                ],
+
+                [
+                  "invest",
+                  "Investment"
+                ]
+
+              ]
+
+            },
+
+            {
+              id:"g",
+              label:
+                "Goal (optional, savings/investment only)",
+
+              type:
+                "number",
+
+              value:
+                ""
+            }
+
           ]
-        },
 
-        {
-          id:"g",
-          label:"Goal (optional, savings/investment only)",
-          type:"number",
-          value:""
-        }
-
-      ]
-
-    });
+        });
 
 
-    if(v&&v.n.trim()){
+      if(
+        v &&
+        v.n.trim()
+      ){
 
-      const b={
+        const b={
 
-        id:uid(),
+          id:
+            uid(),
 
-        name:v.n.trim(),
+          name:
+            v.n.trim(),
 
-        kind:v.k,
+          kind:
+            v.k,
 
-        limit:
-          v.k!=="spend"
-          ?parseFloat(v.g)||0
-          :0,
+          limit:
+            v.k!=="spend"
+            ?parseFloat(v.g)||0
+            :0,
 
-        tx:[]
+          tx:
+            []
 
-      };
+        };
 
-      S.budgets.push(b);
 
-      cur=b.id;
+        S.budgets.push(b);
 
-      save();
+        cur=b.id;
 
-    }
+        save();
 
-  };
+      }
+
+    };
 
 
   if(
     cur!=="all" &&
-    !S.budgets.find(b=>b.id===cur)
+    !S.budgets.find(
+      b=>b.id===cur
+    )
   )
+
     cur="all";
 
 
   cur==="all"
+
     ?renderAll()
+
     :renderOne(
-        S.budgets.find(b=>b.id===cur)
+        S.budgets.find(
+          b=>b.id===cur
+        )
       );
 
 }
@@ -693,39 +924,82 @@ function render(){
 function summary(t,k){
 
   const L=
-    k==="save"
-    ?["Deposited","Withdrawn","Saved"]
-    :
-    k==="invest"
-    ?["Contributed","Sold","Invested"]
-    :
-    ["Income","Spent","Balance"];
 
-  const bal=t.inc-t.exp;
+    k==="save"
+
+    ?
+
+    [
+      "Deposited",
+      "Withdrawn",
+      "Saved"
+    ]
+
+    :
+
+    k==="invest"
+
+    ?
+
+    [
+      "Contributed",
+      "Sold",
+      "Invested"
+    ]
+
+    :
+
+    [
+      "Income",
+      "Spent",
+      "Balance"
+    ];
+
+
+  const bal=
+    t.inc-t.exp;
+
 
   return `
 
     <div class="sum">
 
       <div>
-        <span class="mut">${L[0]}</span>
+
+        <span class="mut">
+          ${L[0]}
+        </span>
+
         <b class="amt in">
           ${fmt(t.inc)}
         </b>
+
       </div>
 
+
       <div>
-        <span class="mut">${L[1]}</span>
+
+        <span class="mut">
+          ${L[1]}
+        </span>
+
         <b class="amt out">
           ${fmt(t.exp)}
         </b>
+
       </div>
 
+
       <div>
-        <span class="mut">${L[2]}</span>
+
+        <span class="mut">
+          ${L[2]}
+        </span>
+
         <b>
           ${fmt(bal)}
         </b>
+
       </div>
 
     </div>
@@ -741,14 +1015,18 @@ function summary(t,k){
 
 function limitBar(t,kind){
 
-  if(!t.lim)return "";
+  if(!t.lim)
+    return "";
+
 
   if(
     kind==="save" ||
     kind==="invest"
   ){
 
-    const sv=t.inc-t.exp;
+    const sv=
+      t.inc-t.exp;
+
 
     const p=
       Math.max(
@@ -759,17 +1037,30 @@ function limitBar(t,kind){
         )
       );
 
+
     return `
 
       <div class="bar">
-        <i style="width:${p}%"></i>
+
+        <i
+          style="width:${p}%"
+        ></i>
+
       </div>
+
 
       <div class="mut">
 
         ${fmt(sv)}
-        ${kind==="save"?"saved":"invested"}
+
+        ${
+          kind==="save"
+          ?"saved"
+          :"invested"
+        }
+
         of ${fmt(t.lim)}
+
         goal (${Math.round(p)}%)
 
       </div>
@@ -778,13 +1069,17 @@ function limitBar(t,kind){
 
   }
 
+
   const p=
     Math.min(
       100,
       t.exp/t.lim*100
     );
 
-  const left=t.lim-t.exp;
+
+  const left=
+    t.lim-t.exp;
+
 
   return `
 
@@ -797,12 +1092,24 @@ function limitBar(t,kind){
 
     </div>
 
+
     <div class="mut">
 
       ${
         left>=0
-        ?fmt(left)+" left of "+fmt(t.lim)
-        :fmt(-left)+" over "+fmt(t.lim)
+
+        ?
+
+        fmt(left)+
+        " left of "+
+        fmt(t.lim)
+
+        :
+
+        fmt(-left)+
+        " over "+
+        fmt(t.lim)
+
       }
 
     </div>
@@ -818,30 +1125,39 @@ function limitBar(t,kind){
 
 function renderAll(){
 
-  const t=totals(S.budgets);
+  const t=
+    totals(S.budgets);
+
 
   $("view").innerHTML=
 
   `
+
     <div class="card">
 
       <div class="mut">
         Total across all budgets
       </div>
 
+
       <div class="big">
         ${fmt(t.inc-t.exp)}
       </div>
 
+
       ${summary(t)}
+
       ${limitBar(t)}
 
     </div>
+
   `+
 
   S.budgets.map(b=>{
 
-    const x=totals([b]);
+    const x=
+      totals([b]);
+
 
     return `
 
@@ -851,15 +1167,22 @@ function renderAll(){
         style="cursor:pointer"
       >
 
-        <b>${esc(b.name)}</b>
+        <b>
+          ${esc(b.name)}
+        </b>
+
 
         ${summary(x,b.kind)}
 
+
         ${limitBar(x,b.kind)}
+
 
         ${
           b.kind==="invest"
+
           ?gainLine(b,x)
+
           :""
         }
 
@@ -869,36 +1192,53 @@ function renderAll(){
 
   }).join("")+
 
+
   chart(
+
     S.budgets.filter(
-      b=>!b.kind||b.kind==="spend"
+
+      b=>
+        !b.kind ||
+        b.kind==="spend"
+
     )
+
   )+
 
+
   `
+
     <button
       class="btn ghost"
       id="expAll"
     >
       Export all to CSV
     </button>
+
   `;
 
 
-  $("expAll").onclick=()=>
-    exportCSV(
-      S.budgets,
-      "all-budgets"
-    );
+  $("expAll").onclick=
+    ()=>
+      exportCSV(
+        S.budgets,
+        "all-budgets"
+      );
 
 
   document
     .querySelectorAll("[data-go]")
     .forEach(el=>
+
       el.onclick=()=>{
-        cur=el.dataset.go;
+
+        cur=
+          el.dataset.go;
+
         render();
+
       }
+
     );
 
 }
@@ -910,7 +1250,9 @@ function renderAll(){
 
 function renderOne(b){
 
-  const t=totals([b]);
+  const t=
+    totals([b]);
+
 
   const list=
     [...b.tx]
@@ -923,17 +1265,21 @@ function renderOne(b){
   $("view").innerHTML=
 
   `
+
     <div class="card">
 
       <div class="mut">
         ${esc(b.name)} balance
       </div>
 
+
       <div class="big">
         ${fmt(t.inc-t.exp)}
       </div>
 
+
       ${summary(t,b.kind)}
+
 
       ${limitBar(t,b.kind)}
 
@@ -950,7 +1296,9 @@ function renderOne(b){
             b.kind==="save"
 
             ?
+
             `
+
               <option value="in">
                 Deposit
               </option>
@@ -958,6 +1306,7 @@ function renderOne(b){
               <option value="out">
                 Withdraw
               </option>
+
             `
 
             :
@@ -965,7 +1314,9 @@ function renderOne(b){
             b.kind==="invest"
 
             ?
+
             `
+
               <option value="in">
                 Contribute
               </option>
@@ -973,10 +1324,13 @@ function renderOne(b){
               <option value="out">
                 Sell / withdraw
               </option>
+
             `
 
             :
+
             `
+
               <option value="out">
                 Expense
               </option>
@@ -984,10 +1338,13 @@ function renderOne(b){
               <option value="in">
                 Income
               </option>
+
             `
+
           }
 
         </select>
+
 
         <input
           id="amt"
@@ -1008,6 +1365,7 @@ function renderOne(b){
           id="note"
           placeholder="Note / category"
         >
+
 
         <input
           id="date"
@@ -1031,7 +1389,9 @@ function renderOne(b){
       </label>
 
 
-      <div style="margin-top:10px">
+      <div
+        style="margin-top:10px"
+      >
 
         <button
           class="btn"
@@ -1049,16 +1409,24 @@ function renderOne(b){
       b.kind==="invest"
 
       ?
+
       `
+
         <div class="card">
 
-          <b>Performance</b>
+          <b>
+            Performance
+          </b>
+
 
           <div style="margin-top:6px">
+
             ${gainLine(b,t)}
+
           </div>
 
         </div>
+
       `
 
       :""
@@ -1068,8 +1436,15 @@ function renderOne(b){
     ${
       b.kind==="save" ||
       b.kind==="invest"
-      ?""
-      :chart([b])
+
+      ?
+
+      ""
+
+      :
+
+      chart([b])
+
     }
 
 
@@ -1081,20 +1456,30 @@ function renderOne(b){
       ?
 
       `
+
         <div class="card">
 
-          <b>Recurring monthly</b>
+          <b>
+            Recurring monthly
+          </b>
+
 
           ${
             S.rec
-            .filter(r=>r.bid===b.id)
+
+            .filter(
+              r=>r.bid===b.id
+            )
+
             .map(r=>`
 
               <div class="tx">
 
                 <div>
 
-                  ${esc(r.note||r.cat)}
+                  ${esc(
+                    r.note||r.cat
+                  )}
 
                   <div class="mut">
                     Next: ${r.next}
@@ -1102,11 +1487,15 @@ function renderOne(b){
 
                 </div>
 
+
                 <div>
 
-                  <span class="amt ${r.type}">
+                  <span
+                    class="amt ${r.type}"
+                  >
                     ${fmt(r.amt)}
                   </span>
+
 
                   <button
                     class="x"
@@ -1119,10 +1508,12 @@ function renderOne(b){
 
               </div>
 
-            `).join("")
+            `)
+            .join("")
           }
 
         </div>
+
       `
 
       :""
@@ -1152,14 +1543,19 @@ function renderOne(b){
 
             </div>
 
+
             <div>
 
-              <span class="amt ${x.type}">
+              <span
+                class="amt ${x.type}"
+              >
 
                 ${x.type==="in"?"+":"−"}
+
                 ${fmt(x.amt)}
 
               </span>
+
 
               <button
                 class="x"
@@ -1172,13 +1568,18 @@ function renderOne(b){
 
           </div>
 
-        `).join("")
+        `)
+        .join("")
 
         :
 
-        `<div class="mut">
-          No transactions yet.
-        </div>`
+        `
+
+          <div class="mut">
+            No transactions yet.
+          </div>
+
+        `
 
       }
 
@@ -1191,13 +1592,16 @@ function renderOne(b){
         b.kind==="invest"
 
         ?
+
         `
+
           <button
             class="btn ghost"
             id="val"
           >
             Update current value
           </button>
+
         `
 
         :""
@@ -1216,15 +1620,24 @@ function renderOne(b){
         class="btn ghost"
         id="lim"
       >
+
         ${
           b.kind==="save"
+
           ?"Set savings goal"
+
           :
+
           b.kind==="invest"
+
           ?"Set investment goal"
+
           :
+
           "Set spending limit"
+
         }
+
       </button>
 
 
@@ -1255,13 +1668,18 @@ function renderOne(b){
         $("amt").value
       );
 
-    if(!(a>0))return;
+
+    if(!(a>0))
+      return;
+
 
     const o={
 
-      type:$("type").value,
+      type:
+        $("type").value,
 
-      amt:a,
+      amt:
+        a,
 
       note:
         $("note").value.trim(),
@@ -1274,21 +1692,28 @@ function renderOne(b){
 
     if($("rep").checked){
 
-      S.rec=S.rec||[];
+      S.rec=
+        S.rec||[];
+
 
       S.rec.push({
 
-        id:uid(),
+        id:
+          uid(),
 
-        bid:b.id,
+        bid:
+          b.id,
 
         ...o,
 
-        day:+o.date.slice(8),
+        day:
+          +o.date.slice(8),
 
-        next:o.date
+        next:
+          o.date
 
       });
+
 
       applyRec();
 
@@ -1298,13 +1723,15 @@ function renderOne(b){
 
       b.tx.push({
 
-        id:uid(),
+        id:
+          uid(),
 
         ...o
 
       });
 
     }
+
 
     save();
 
@@ -1315,165 +1742,161 @@ function renderOne(b){
     .querySelectorAll("[data-r]")
     .forEach(el=>
 
-      el.onclick=async()=>{
+      el.onclick=
+        async()=>{
 
-        const v=await dlg({
+          const v=
+            await dlg({
 
-          title:
-            "Stop this recurring item?",
+              title:
+                "Stop this recurring item?",
 
-          msg:
-            "Are you sure? Past transactions stay; future ones won't be added.",
+              msg:
+                "Are you sure? Past transactions stay; future ones won't be added.",
 
-          ok:
-            "Stop it"
+              ok:
+                "Stop it"
 
-        });
+            });
 
-        if(v){
 
-          S.rec=
-            S.rec.filter(
-              r=>r.id!==el.dataset.r
-            );
+          if(v){
 
-          save();
+            S.rec=
+              S.rec.filter(
+                r=>r.id!==el.dataset.r
+              );
+
+            save();
+
+          }
 
         }
 
-      }
-
     );
 
 
-  $("exp").onclick=()=>
-    exportCSV(
-      [b],
-      b.name
-        .replace(/\W+/g,"-")
-        .toLowerCase()
-    );
+  $("exp").onclick=
+    ()=>
+      exportCSV(
+        [b],
+        b.name
+          .replace(/\W+/g,"-")
+          .toLowerCase()
+      );
 
 
   document
     .querySelectorAll("[data-d]")
     .forEach(el=>
 
-      el.onclick=async()=>{
+      el.onclick=
+        async()=>{
 
-        const t=
-          b.tx.find(
-            x=>x.id===el.dataset.d
-          );
-
-        const v=await dlg({
-
-          title:
-            "Remove this transaction?",
-
-          msg:
-            "Are you sure you want to remove "+
-            (
-              t&&t.note
-              ?t.note+" ("+fmt(t.amt)+")"
-              :"it"
-            )+"?",
-
-          ok:
-            "Remove"
-
-        });
-
-        if(v){
-
-          b.tx=
-            b.tx.filter(
-              x=>x.id!==el.dataset.d
+          const t=
+            b.tx.find(
+              x=>x.id===el.dataset.d
             );
 
-          save();
+
+          const v=
+            await dlg({
+
+              title:
+                "Remove this transaction?",
+
+              msg:
+                "Are you sure you want to remove "+
+                (
+                  t&&t.note
+                  ?
+                  t.note+
+                  " ("+
+                  fmt(t.amt)+
+                  ")"
+
+                  :
+
+                  "it"
+
+                )+
+                "?",
+
+              ok:
+                "Remove"
+
+            });
+
+
+          if(v){
+
+            b.tx=
+              b.tx.filter(
+                x=>x.id!==el.dataset.d
+              );
+
+            save();
+
+          }
 
         }
-
-      }
 
     );
 
 
-  $("lim").onclick=async()=>{
+  $("lim").onclick=
+    async()=>{
 
-    const v=await dlg({
+      const v=
+        await dlg({
 
-      title:
-        b.kind==="save"
-        ?"Savings goal"
-        :
-        b.kind==="invest"
-        ?"Investment goal"
-        :
-        "Spending limit",
+          title:
 
-      msg:
-        "Use 0 for none.",
+            b.kind==="save"
 
-      fields:[{
+            ?
 
-        id:"v",
+            "Savings goal"
 
-        label:"Amount",
+            :
 
-        type:"number",
+            b.kind==="invest"
 
-        value:b.limit||0
+            ?
 
-      }]
+            "Investment goal"
 
-    });
+            :
 
-    if(v){
-
-      b.limit=
-        parseFloat(v.v)||0;
-
-      save();
-
-    }
-
-  };
+            "Spending limit",
 
 
-  if($("val"))
+          msg:
+            "Use 0 for none.",
 
-    $("val").onclick=async()=>{
 
-      const v=await dlg({
+          fields:[{
 
-        title:
-          "Current value",
+            id:
+              "v",
 
-        msg:
-          "What is this investment worth right now?",
+            label:
+              "Amount",
 
-        fields:[{
+            type:
+              "number",
 
-          id:"v",
+            value:
+              b.limit||0
 
-          label:"Current value",
+          }]
 
-          type:"number",
+        });
 
-          value:b.value??""
 
-        }]
+      if(v){
 
-      });
-
-      if(
-        v &&
-        v.v!==""
-      ){
-
-        b.value=
+        b.limit=
           parseFloat(v.v)||0;
 
         save();
@@ -1483,74 +1906,133 @@ function renderOne(b){
     };
 
 
-  $("ren").onclick=async()=>{
+  if($("val"))
 
-    const v=await dlg({
+    $("val").onclick=
+      async()=>{
 
-      title:
-        "Rename budget",
+        const v=
+          await dlg({
 
-      fields:[{
+            title:
+              "Current value",
 
-        id:"n",
+            msg:
+              "What is this investment worth right now?",
 
-        label:"Name",
+            fields:[{
 
-        value:b.name
+              id:
+                "v",
 
-      }]
+              label:
+                "Current value",
 
-    });
+              type:
+                "number",
 
-    if(
-      v &&
-      v.n.trim()
-    ){
+              value:
+                b.value??""
 
-      b.name=
-        v.n.trim();
+            }]
 
-      save();
-
-    }
-
-  };
+          });
 
 
-  $("del").onclick=async()=>{
+        if(
+          v &&
+          v.v!==""
+        ){
 
-    const v=await dlg({
+          b.value=
+            parseFloat(v.v)||0;
 
-      title:
-        "Delete "+b.name+"?",
+          save();
 
-      msg:
-        "All its transactions will be removed.",
+        }
 
-      ok:
-        "Delete"
+      };
 
-    });
 
-    if(v){
+  $("ren").onclick=
+    async()=>{
 
-      S.budgets=
-        S.budgets.filter(
-          x=>x.id!==b.id
-        );
+      const v=
+        await dlg({
 
-      S.rec=
-        (S.rec||[]).filter(
-          r=>r.bid!==b.id
-        );
+          title:
+            "Rename budget",
 
-      cur="all";
+          fields:[{
 
-      save();
+            id:
+              "n",
 
-    }
+            label:
+              "Name",
 
-  };
+            value:
+              b.name
+
+          }]
+
+        });
+
+
+      if(
+        v &&
+        v.n.trim()
+      ){
+
+        b.name=
+          v.n.trim();
+
+        save();
+
+      }
+
+    };
+
+
+  $("del").onclick=
+    async()=>{
+
+      const v=
+        await dlg({
+
+          title:
+            "Delete "+b.name+"?",
+
+          msg:
+            "All its transactions will be removed.",
+
+          ok:
+            "Delete"
+
+        });
+
+
+      if(v){
+
+        S.budgets=
+          S.budgets.filter(
+            x=>x.id!==b.id
+          );
+
+
+        S.rec=
+          (S.rec||[]).filter(
+            r=>r.bid!==b.id
+          );
+
+
+        cur="all";
+
+        save();
+
+      }
+
+    };
 
 }
 
@@ -1586,32 +2068,36 @@ try{
     firebaseConfig
   );
 
-  auth=firebase.auth();
+  auth=
+    firebase.auth();
 
-  fdb=firebase.firestore();
+  fdb=
+    firebase.firestore();
 
-
-  /* KEEP USER SIGNED IN */
 
   auth.setPersistence(
     firebase.auth.Auth.Persistence.LOCAL
-  ).catch(e=>{
+  )
+  .catch(e=>{
+
     console.error(
       "Persistence error:",
       e
     );
+
   });
 
 
-  /* FIRESTORE OFFLINE CACHE */
-
   fdb.enablePersistence({
     synchronizeTabs:true
-  }).catch(e=>{
+  })
+  .catch(e=>{
+
     console.log(
       "Firestore persistence:",
       e
     );
+
   });
 
 
@@ -1636,53 +2122,80 @@ try{
 
 async function signIn(){
 
-  const v=await dlg({
+  const v=
+    await dlg({
 
-    title:
-      "Cloud Sync",
+      title:
+        "Cloud Sync",
 
-    msg:
-      "Sign in or create an account to sync your budgets across your devices.",
+      msg:
+        "Sign in or create an account to sync your budgets across your devices.",
 
-    ok:
-      "Continue",
+      ok:
+        "Continue",
 
-    fields:[
+      fields:[
 
-      {
-        id:"m",
-        label:"Email",
-        type:"email"
-      },
+        {
+          id:
+            "m",
 
-      {
-        id:"p",
-        label:"Password",
-        type:"password"
-      },
+          label:
+            "Email",
 
-      {
-        id:"a",
-        label:"Action",
+          type:
+            "email"
+        },
 
-        options:[
-          ["in","Sign in"],
-          ["up","Create account"]
-        ]
+        {
+          id:
+            "p",
 
-      }
+          label:
+            "Password",
 
-    ]
+          type:
+            "password"
+        },
 
-  });
+        {
+          id:
+            "a",
+
+          label:
+            "Action",
+
+          options:[
+
+            [
+              "in",
+              "Sign in"
+            ],
+
+            [
+              "up",
+              "Create account"
+            ]
+
+          ]
+
+        }
+
+      ]
+
+    });
 
 
-  if(!v)return;
+  if(!v)
+    return;
 
 
   try{
 
-    if(!v.m||!v.p){
+    if(
+      !v.m ||
+      !v.p
+    ){
 
       $("sync").textContent=
         "Enter email and password";
@@ -1692,8 +2205,6 @@ async function signIn(){
     }
 
 
-    /* EXPLICITLY USE LOCAL PERSISTENCE */
-
     await auth.setPersistence(
       firebase.auth.Auth.Persistence.LOCAL
     );
@@ -1701,19 +2212,21 @@ async function signIn(){
 
     if(v.a==="up"){
 
-      await auth.createUserWithEmailAndPassword(
-        v.m,
-        v.p
-      );
+      await auth
+        .createUserWithEmailAndPassword(
+          v.m,
+          v.p
+        );
 
     }
 
     else{
 
-      await auth.signInWithEmailAndPassword(
-        v.m,
-        v.p
-      );
+      await auth
+        .signInWithEmailAndPassword(
+          v.m,
+          v.p
+        );
 
     }
 
@@ -1722,12 +2235,14 @@ async function signIn(){
 
     console.error(e);
 
+
     let message=
       "Unable to sign in.";
 
 
     if(
-      e.code==="auth/configuration-not-found"
+      e.code===
+      "auth/configuration-not-found"
     ){
 
       message=
@@ -1736,7 +2251,8 @@ async function signIn(){
     }
 
     else if(
-      e.code==="auth/email-already-in-use"
+      e.code===
+      "auth/email-already-in-use"
     ){
 
       message=
@@ -1745,7 +2261,8 @@ async function signIn(){
     }
 
     else if(
-      e.code==="auth/invalid-email"
+      e.code===
+      "auth/invalid-email"
     ){
 
       message=
@@ -1754,7 +2271,8 @@ async function signIn(){
     }
 
     else if(
-      e.code==="auth/weak-password"
+      e.code===
+      "auth/weak-password"
     ){
 
       message=
@@ -1763,8 +2281,10 @@ async function signIn(){
     }
 
     else if(
-      e.code==="auth/wrong-password"||
-      e.code==="auth/invalid-credential"
+      e.code===
+      "auth/wrong-password" ||
+      e.code===
+      "auth/invalid-credential"
     ){
 
       message=
@@ -1773,7 +2293,8 @@ async function signIn(){
     }
 
     else if(
-      e.code==="auth/user-not-found"
+      e.code===
+      "auth/user-not-found"
     ){
 
       message=
@@ -1794,31 +2315,32 @@ async function signIn(){
    SYNC BUTTON
 ========================= */
 
-$("sync").onclick=()=>{
+$("sync").onclick=
+  ()=>{
 
-  if(!fbOn){
+    if(!fbOn){
 
-    $("sync").textContent=
-      "Firebase unavailable";
+      $("sync").textContent=
+        "Firebase unavailable";
 
-    return;
+      return;
 
-  }
+    }
 
 
-  if(auth.currentUser){
+    if(auth.currentUser){
 
-    auth.signOut();
+      auth.signOut();
 
-  }
+    }
 
-  else{
+    else{
 
-    signIn();
+      signIn();
 
-  }
+    }
 
-};
+  };
 
 
 /* =========================
@@ -1828,9 +2350,8 @@ $("sync").onclick=()=>{
 if(fbOn){
 
   auth.onAuthStateChanged(
-    async user=>{
 
-      /* Remove old listener */
+    async user=>{
 
       if(unsub){
 
@@ -1846,8 +2367,6 @@ if(fbOn){
       ready=false;
 
 
-      /* NOT SIGNED IN */
-
       if(!user){
 
         $("sync").textContent=
@@ -1858,15 +2377,11 @@ if(fbOn){
       }
 
 
-      /* USER-SPECIFIC DOCUMENT */
-
       ref=
         fdb
         .collection("budgets")
         .doc(user.uid);
 
-
-      /* REAL-TIME FIRESTORE SYNC */
 
       unsub=
         ref.onSnapshot(
@@ -1910,20 +2425,21 @@ if(fbOn){
 
               }
 
-
-              /* FIRST TIME THIS USER LOGS IN */
-
               else if(!ready){
 
                 const json=
                   JSON.stringify(S);
 
+
                 await ref.set({
 
-                  json:json,
+                  json:
+                    json,
 
                   updatedAt:
-                    firebase.firestore.FieldValue.serverTimestamp()
+                    firebase.firestore
+                    .FieldValue
+                    .serverTimestamp()
 
                 });
 

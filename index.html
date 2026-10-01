@@ -404,15 +404,30 @@ function chart(list){
 function exportCSV(list,name){
 
   const q=v=>
-    '"'+String(v).replace(/"/g,'""')+'"';
+    '"'+
+    String(v??"")
+      .replace(/"/g,'""')+
+    '"';
 
   let totalIncome=0;
   let totalExpense=0;
 
-  const transactions=[];
+  const rows=[];
 
 
-  /* BUILD TRANSACTIONS */
+  /* HEADER */
+
+  rows.push([
+    "Budget",
+    "Date",
+    "Type",
+    "Note / Category",
+    "Amount",
+    "Amount Left"
+  ].map(q).join(","));
+
+
+  /* TRANSACTIONS */
 
   list.forEach(b=>{
 
@@ -424,6 +439,7 @@ function exportCSV(list,name){
           a.date.localeCompare(c.date)
       );
 
+
     sorted.forEach(t=>{
 
       const amount=
@@ -433,148 +449,72 @@ function exportCSV(list,name){
       if(t.type==="in"){
 
         totalIncome+=amount;
-
         balance+=amount;
 
       }else{
 
         totalExpense+=amount;
-
         balance-=amount;
 
       }
 
 
-      transactions.push({
+      rows.push([
 
-        budget:b.name,
+        b.name,
 
-        date:t.date,
+        t.date,
 
-        type:
-          t.type==="in"
+        t.type==="in"
           ?"Income"
           :"Expense",
 
-        note:
-          t.note||t.cat||"",
+        t.note||t.cat||"",
 
-        amount,
+        t.type==="in"
+          ?"+"+amount.toFixed(2)
+          :"-"+amount.toFixed(2),
 
-        balance,
+        balance.toFixed(2)
 
-        color:
-          t.type==="in"
-          ?"GREEN"
-          :"RED"
-
-      });
+      ].map(q).join(","));
 
     });
 
   });
 
 
-  const finalBalance=
+  /* TOTALS */
+
+  const totalLeft=
     totalIncome-totalExpense;
-
-
-  const rows=[];
-
-
-  /* SUMMARY */
-
-  rows.push([
-    "BUDGET SUMMARY",
-    "",
-    "",
-    "",
-    "",
-    "",
-    ""
-  ].map(q).join(","));
-
-
-  rows.push([
-    "Total Income",
-    totalIncome,
-    "",
-    "",
-    "",
-    "GREEN",
-    ""
-  ].map(q).join(","));
-
-
-  rows.push([
-    "Total Expenses",
-    totalExpense,
-    "",
-    "",
-    "",
-    "RED",
-    ""
-  ].map(q).join(","));
-
-
-  rows.push([
-    "Total Amount Left",
-    finalBalance,
-    "",
-    "",
-    "",
-    finalBalance>=0
-      ?"GREEN"
-      :"RED",
-    ""
-  ].map(q).join(","));
 
 
   rows.push("");
 
 
-  /* TRANSACTION HEADER */
-
   rows.push([
-    "Budget",
-    "Date",
-    "Type",
-    "Note / Category",
-    "Amount",
-    "Color",
-    "Amount Left"
+    "TOTAL INCOME",
+    totalIncome.toFixed(2)
   ].map(q).join(","));
 
 
-  /* TRANSACTIONS */
+  rows.push([
+    "TOTAL EXPENSES",
+    "-"+totalExpense.toFixed(2)
+  ].map(q).join(","));
 
-  transactions.forEach(t=>{
 
-    rows.push([
+  rows.push([
+    "TOTAL AMOUNT LEFT",
+    totalLeft.toFixed(2)
+  ].map(q).join(","));
 
-      t.budget,
 
-      t.date,
-
-      t.type,
-
-      t.note,
-
-      t.type==="Income"
-        ?"+"+t.amount
-        :"-"+t.amount,
-
-      t.color,
-
-      t.balance
-
-    ].map(q).join(","));
-
-  });
-
+  /* DOWNLOAD */
 
   const csv=
-    rows.join("\n");
+    rows.join("\r\n");
 
 
   const blob=
@@ -604,7 +544,10 @@ function exportCSV(list,name){
 
   a.remove();
 
-  URL.revokeObjectURL(url);
+  setTimeout(
+    ()=>URL.revokeObjectURL(url),
+    1000
+  );
 
 }
 
@@ -720,9 +663,9 @@ function totals(list){
 
       t.type==="in"
 
-      ?inc+=t.amt
+      ?inc+=Number(t.amt)||0
 
-      :exp+=t.amt
+      :exp+=Number(t.amt)||0
 
     );
 
